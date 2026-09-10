@@ -217,9 +217,25 @@ const resolveApiUrl = () =>
     ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
     : "https://forge.manus.im/v1/chat/completions";
 
+// OpenAI's own API — the exact shape this app already speaks (messages, response_format
+// json_schema, choices[0].message.content), so it can be tried as a fallback with zero changes
+// anywhere else in the app.
+const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+
+const hasPrimaryProvider = () => Boolean(ENV.forgeApiKey);
+const hasOpenAIFallback = () => Boolean(ENV.openaiApiKey);
+
 const assertApiKey = () => {
   if (!ENV.forgeApiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
+  }
+};
+
+const assertAnyProviderConfigured = () => {
+  if (!hasPrimaryProvider() && !hasOpenAIFallback()) {
+    throw new Error(
+      "No LLM provider is configured: set BUILT_IN_FORGE_API_KEY (primary) and/or OPENAI_API_KEY (fallback)"
+    );
   }
 };
 
@@ -340,7 +356,7 @@ const fetchWithBackoff = async (
 };
 
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  assertApiKey();
+  assertAnyProviderConfigured();
 
   const {
     messages,
@@ -401,23 +417,43 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetchWithBackoff(resolveApiUrl(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
-    );
+  const attempts: { label: string; url: string; apiKey: string; body: Record<string, unknown> }[] = [];
+  if (hasPrimaryProvider()) {
+    attempts.push({ label: "primary (Manus Forge)", url: resolveApiUrl(), apiKey: ENV.forgeApiKey, body: payload });
+  }
+  if (hasOpenAIFallback()) {
+    // OpenAI requires `model` in the body; the primary provider tolerates it being omitted (it
+    // has its own default), so only fill it in for this attempt.
+    attempts.push({ label: "fallback (OpenAI)", url: OPENAI_API_URL, apiKey: ENV.openaiApiKey, body: { ...payload, model: payload.model || ENV.openaiModel } });
   }
 
-  return (await response.json()) as InvokeResult;
+  let lastError: unknown;
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i];
+    try {
+      const response = await fetchWithBackoff(attempt.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${attempt.apiKey}`,
+        },
+        body: JSON.stringify(attempt.body),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`);
+      }
+
+      return (await response.json()) as InvokeResult;
+    } catch (error) {
+      lastError = error;
+      const isLastAttempt = i === attempts.length - 1;
+      console.warn(`[LLM] ${attempt.label} failed${isLastAttempt ? "" : ", trying fallback"}:`, error instanceof Error ? error.message : error);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("All configured LLM providers failed");
 }
 
 export type ModelInfo = {

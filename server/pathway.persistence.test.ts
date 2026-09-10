@@ -2,11 +2,12 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const upsertDraft = vi.fn();
 const saveConversationPathway = vi.fn();
+const upsertProfile = vi.fn();
 const invokeLLM = vi.fn();
 
 vi.mock("./db", async () => {
   const actual = await vi.importActual<typeof import("./db")>("./db");
-  return { ...actual, addMessage: vi.fn(), upsertPersonalisedPathwayDraft: upsertDraft, saveConversationPathway };
+  return { ...actual, addMessage: vi.fn(), upsertPersonalisedPathwayDraft: upsertDraft, saveConversationPathway, upsertProfile };
 });
 
 vi.mock("./_core/llm", () => ({ invokeLLM }));
@@ -32,21 +33,35 @@ const readyPathway = {
   immediate_action: "Save one official study opportunity",
 };
 
-function llmReply(save_intent: boolean) {
-  invokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ reply: save_intent ? "Saved." : "Here is a direction to explore.", profile_updates: {}, pathway: readyPathway, save_intent }) } }] });
+function llmReply(reply: string, profileUpdates: Record<string, string> = {}) {
+  invokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ reply, profile_updates: profileUpdates, pathway: readyPathway }) } }] });
 }
 
-describe("guide pathway persistence flow", () => {
+describe("guide pathway draft flow (save button is the only save path — see pathways.save tests)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("rejects save intent when no conversation draft exists", async () => {
-    saveConversationPathway.mockResolvedValueOnce(null);
-    llmReply(true);
-    const result = await appRouter.createCaller(context).guide.respond({ profile: "{}", history: [], message: "save this", conversationId: 91 });
-    expect(result.pathway).toBeNull();
-    expect(saveConversationPathway).toHaveBeenCalledWith(7, 91);
+  it("keeps the conversation's draft pathway current on every ready turn, regardless of message wording", async () => {
+    llmReply("Here is a direction to explore.");
+    const first = await appRouter.createCaller(context).guide.respond({ profile: "{}", history: [], message: "show me a direction", conversationId: 92 });
+    expect(first.pathwayDraft).toMatchObject(readyPathway);
+    expect(first.pathwayReady).toBe(true);
+    expect(upsertDraft).toHaveBeenCalledWith(7, 92, readyPathway, expect.any(String));
+
+    // A plain "thanks" no longer needs to be parsed as save intent — the draft still updates,
+    // and nothing is auto-promoted to a saved pathway from chat.
+    llmReply("Glad that helps!");
+    const second = await appRouter.createCaller(context).guide.respond({ profile: "{}", history: [], message: "thanks", conversationId: 92 });
+    expect(second.pathwayReady).toBe(true);
+    expect(saveConversationPathway).not.toHaveBeenCalled();
+  });
+
+  it("does not persist a draft when the pathway is not yet ready", async () => {
+    invokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ reply: "Tell me more about your interests.", profile_updates: {}, pathway: null }) } }] });
+    const result = await appRouter.createCaller(context).guide.respond({ profile: "{}", history: [], message: "I like computers", conversationId: 92 });
+    expect(result.pathwayDraft).toBeNull();
+    expect(result.pathwayReady).toBe(false);
     expect(upsertDraft).not.toHaveBeenCalled();
   });
 
@@ -99,19 +114,75 @@ describe("guide pathway persistence flow", () => {
       "Save one official study opportunity",
     ]);
   });
+});
 
-  it("creates a draft first, then promotes that conversation draft on save intent", async () => {
-    upsertDraft.mockResolvedValueOnce({ id: 12, conversationId: 92, isSaved: 0 });
+describe("pathways.save — the explicit, deterministic save button endpoint", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("promotes whatever ready draft the guide already persisted for this conversation", async () => {
     saveConversationPathway.mockResolvedValueOnce({ id: 12, conversationId: 92, isSaved: 1 });
-
-    llmReply(false);
-    const draftResult = await appRouter.createCaller(context).guide.respond({ profile: "{}", history: [], message: "show me a direction", conversationId: 92 });
-    expect(draftResult.pathway).toBeNull();
-    expect(upsertDraft).toHaveBeenCalledWith(7, 92, readyPathway, expect.any(String));
-
-    llmReply(true);
-    const savedResult = await appRouter.createCaller(context).guide.respond({ profile: "{}", history: [], message: "save this pathway", conversationId: 92 });
-    expect(savedResult.pathway).toMatchObject({ id: 12, conversationId: 92, isSaved: 1 });
+    const result = await appRouter.createCaller(context).pathways.save({ conversationId: 92 });
     expect(saveConversationPathway).toHaveBeenCalledWith(7, 92);
+    expect(result).toMatchObject({ id: 12, conversationId: 92, isSaved: 1 });
+  });
+
+  it("returns null with no save and no error when no ready draft exists for the conversation", async () => {
+    saveConversationPathway.mockResolvedValueOnce(null);
+    const result = await appRouter.createCaller(context).pathways.save({ conversationId: 999 });
+    expect(saveConversationPathway).toHaveBeenCalledWith(7, 999);
+    expect(result).toBeNull();
+  });
+});
+
+describe("guide.respond applies extracted profile_updates to the user's profile", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("persists every known field the model extracts in one dense turn", async () => {
+    llmReply("Great, that's a full picture — thanks!", {
+      goal: "Earn a qualification",
+      education: "Matric",
+      interests: "Computers and problem solving",
+      skills: "Basic coding",
+      province: "Gauteng",
+      constraints: "Limited transport budget",
+    });
+    const result = await appRouter.createCaller(context).guide.respond({
+      profile: "{}",
+      history: [],
+      message: "My goal is to earn a qualification, I finished matric, I like computers and problem solving, I know basic coding, I'm in Gauteng, and transport is limited for me",
+      conversationId: 92,
+    });
+    expect(upsertProfile).toHaveBeenCalledWith(7, {
+      goal: "Earn a qualification",
+      education: "Matric",
+      interests: "Computers and problem solving",
+      skills: "Basic coding",
+      province: "Gauteng",
+      constraints: "Limited transport budget",
+    });
+    expect(result.profileUpdates).toEqual({
+      goal: "Earn a qualification",
+      education: "Matric",
+      interests: "Computers and problem solving",
+      skills: "Basic coding",
+      province: "Gauteng",
+      constraints: "Limited transport budget",
+    });
+  });
+
+  it("drops blank strings and fields that are not real profile columns", async () => {
+    llmReply("Tell me more.", { goal: "", province: "Gauteng", favourite_colour: "blue", experience: "   " } as any);
+    await appRouter.createCaller(context).guide.respond({ profile: "{}", history: [], message: "I'm in Gauteng", conversationId: 92 });
+    expect(upsertProfile).toHaveBeenCalledWith(7, { province: "Gauteng" });
+  });
+
+  it("does not touch the profile when nothing new was extracted", async () => {
+    llmReply("Tell me more about what you enjoy.", {});
+    await appRouter.createCaller(context).guide.respond({ profile: "{}", history: [], message: "hmm not sure", conversationId: 92 });
+    expect(upsertProfile).not.toHaveBeenCalled();
   });
 });

@@ -39,10 +39,18 @@ export function getSessionCookieOptions(
   //       ? hostname
   //       : undefined;
 
+  // `SameSite=None` cookies must also be `Secure`, or browsers silently drop the
+  // Set-Cookie header entirely (no warning surfaced to the app). That combination is
+  // needed for cross-site/iframe embedding over HTTPS (e.g. inside the Manus preview
+  // frame), but it means a plain-HTTP request — any local dev server — would never be
+  // able to persist a session at all. Fall back to `Lax` there instead, which doesn't
+  // require `Secure` and still works fine for a same-origin app.
+  const secure = isSecureRequest(req);
+
   return {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
-    secure: isSecureRequest(req),
+    sameSite: secure ? "none" : "lax",
+    secure,
   };
 }

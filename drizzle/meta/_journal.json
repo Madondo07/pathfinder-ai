@@ -1,54 +1,12 @@
 {
   "version": "7",
-  "dialect": "mysql",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "5",
-      "when": 1788421602637,
-      "tag": "0000_large_tomorrow_man",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1788421739985,
-      "tag": "0001_sudden_wildside",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "5",
-      "when": 1788938178436,
-      "tag": "0002_chemical_ogun",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1788948286477,
-      "tag": "0003_quick_marten_broadcloak",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "5",
-      "when": 1788955299107,
-      "tag": "0004_chemical_chameleon",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "5",
-      "when": 1789023967425,
-      "tag": "0005_nasty_justice",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "5",
-      "when": 1789024246903,
-      "tag": "0006_faithful_zaladane",
+      "version": "7",
+      "when": 1789039320826,
+      "tag": "0000_groovy_vanisher",
       "breakpoints": true
     }
   ]
