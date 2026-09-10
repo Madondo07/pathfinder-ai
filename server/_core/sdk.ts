@@ -2,7 +2,16 @@ import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS, decodeOAuthState } from "@s
 import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
-import type { Request } from "express";
+// Deliberately not importing Express's `Request` type here — see the identical note in
+// cookies.ts: `@types/express` (a devDependency) didn't resolve the same way in Vercel's
+// isolated per-function build as it does locally, and `authenticateRequest` only ever reads
+// two headers, so a minimal structural shape avoids that whole class of problem.
+type MinimalRequest = {
+  headers: {
+    cookie?: string;
+    authorization?: string;
+  };
+};
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
@@ -274,7 +283,7 @@ class SDKServer {
     return undefined;
   }
 
-  async authenticateRequest(req: Request): Promise<AuthenticatedUser> {
+  async authenticateRequest(req: MinimalRequest): Promise<AuthenticatedUser> {
     // 1. Prefer the session cookie (regular OAuth login).
     const cookies = this.parseCookies(req.headers.cookie);
     let sessionToken = cookies.get(COOKIE_NAME);

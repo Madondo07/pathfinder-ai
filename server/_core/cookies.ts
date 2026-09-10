@@ -1,4 +1,21 @@
-import type { CookieOptions, Request } from "express";
+// Deliberately NOT importing Express's `Request`/`CookieOptions` types here — in Vercel's
+// isolated per-function build, `@types/express` (a devDependency) doesn't always resolve the
+// same way it does in a full local `tsc` run, and that mismatch showed up as real build
+// failures (`.headers` not found, `CookieOptions` resolving with no keys at all). A minimal,
+// self-contained shape sidesteps that whole class of environment-dependent problem — Express's
+// real Request/CookieOptions objects satisfy these structurally, so nothing else has to change.
+type MinimalRequest = {
+  protocol: string;
+  headers: { [key: string]: string | string[] | undefined };
+};
+
+type SessionCookieOptions = {
+  httpOnly: boolean;
+  path: string;
+  sameSite: "none" | "lax";
+  secure: boolean;
+  domain?: string;
+};
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -8,22 +25,20 @@ function isIpAddress(host: string) {
   return host.includes(":");
 }
 
-function isSecureRequest(req: Request) {
+function isSecureRequest(req: MinimalRequest) {
   if (req.protocol === "https") return true;
 
   const forwardedProto = req.headers["x-forwarded-proto"];
   if (!forwardedProto) return false;
 
-  const protoList = Array.isArray(forwardedProto)
+  const protoList: string[] = Array.isArray(forwardedProto)
     ? forwardedProto
     : forwardedProto.split(",");
 
-  return protoList.some(proto => proto.trim().toLowerCase() === "https");
+  return protoList.some((proto: string) => proto.trim().toLowerCase() === "https");
 }
 
-export function getSessionCookieOptions(
-  req: Request
-): Pick<CookieOptions, "domain" | "httpOnly" | "path" | "sameSite" | "secure"> {
+export function getSessionCookieOptions(req: MinimalRequest): SessionCookieOptions {
   // const hostname = req.hostname;
   // const shouldSetDomain =
   //   hostname &&

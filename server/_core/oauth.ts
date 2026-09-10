@@ -1,17 +1,32 @@
 import { COOKIE_NAME, ONE_YEAR_MS, OAUTH_STATE_COOKIE, decodeOAuthState } from "@shared/const";
 import { parse as parseCookieHeader } from "cookie";
-import type { Express, Request, Response } from "express";
+import type { Express } from "express";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
 
-function getQueryParam(req: Request, key: string): string | undefined {
+// Same reasoning as cookies.ts/sdk.ts: minimal structural types instead of Express's
+// `Request`/`Response`, which didn't resolve consistently in Vercel's isolated function build.
+type MinimalRequest = {
+  query: { [key: string]: unknown };
+  protocol: string;
+  headers: { cookie?: string };
+};
+type MinimalResponse = {
+  status: (code: number) => MinimalResponse;
+  json: (body: unknown) => void;
+  clearCookie: (name: string, options: Record<string, unknown>) => void;
+  cookie: (name: string, value: string, options: Record<string, unknown>) => void;
+  redirect: (status: number, url: string) => void;
+};
+
+function getQueryParam(req: MinimalRequest, key: string): string | undefined {
   const value = req.query[key];
   return typeof value === "string" ? value : undefined;
 }
 
 export function registerOAuthRoutes(app: Express) {
-  app.get("/api/oauth/callback", async (req: Request, res: Response) => {
+  app.get("/api/oauth/callback", async (req: MinimalRequest, res: MinimalResponse) => {
     const code = getQueryParam(req, "code");
     const state = getQueryParam(req, "state");
 
