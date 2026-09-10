@@ -3,10 +3,14 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const getUserByEmail = vi.fn();
 const createLocalUser = vi.fn();
 const createSessionToken = vi.fn().mockResolvedValue("signed.session.token");
+// These tests exercise the auth router's logic against directly-mocked db functions, not a real
+// database connection — stub getDb as "available" so assertDatabaseAvailable() (which checks real
+// connectivity) doesn't reject every call just because DATABASE_URL isn't set in the test env.
+const getDb = vi.fn().mockResolvedValue({});
 
 vi.mock("./db", async () => {
   const actual = await vi.importActual<typeof import("./db")>("./db");
-  return { ...actual, getUserByEmail, createLocalUser };
+  return { ...actual, getUserByEmail, createLocalUser, getDb };
 });
 
 vi.mock("./_core/sdk", () => ({ sdk: { createSessionToken } }));

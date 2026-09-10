@@ -217,13 +217,17 @@ const resolveApiUrl = () =>
     ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
     : "https://forge.manus.im/v1/chat/completions";
 
-// OpenAI's own API — the exact shape this app already speaks (messages, response_format
-// json_schema, choices[0].message.content), so it can be tried as a fallback with zero changes
-// anywhere else in the app.
-const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+// Any OpenAI-compatible base URL works here (OpenAI itself, Groq, etc.) — this app already
+// speaks that exact request/response shape, so swapping providers is just a base URL/key/model
+// change, never a code change.
+const DEFAULT_FALLBACK_BASE_URL = "https://api.openai.com/v1";
+const resolveFallbackUrl = () => {
+  const base = ENV.fallbackApiUrl && ENV.fallbackApiUrl.trim().length > 0 ? ENV.fallbackApiUrl : DEFAULT_FALLBACK_BASE_URL;
+  return `${base.replace(/\/$/, "")}/chat/completions`;
+};
 
 const hasPrimaryProvider = () => Boolean(ENV.forgeApiKey);
-const hasOpenAIFallback = () => Boolean(ENV.openaiApiKey);
+const hasFallbackProvider = () => Boolean(ENV.fallbackApiKey);
 
 const assertApiKey = () => {
   if (!ENV.forgeApiKey) {
@@ -232,9 +236,9 @@ const assertApiKey = () => {
 };
 
 const assertAnyProviderConfigured = () => {
-  if (!hasPrimaryProvider() && !hasOpenAIFallback()) {
+  if (!hasPrimaryProvider() && !hasFallbackProvider()) {
     throw new Error(
-      "No LLM provider is configured: set BUILT_IN_FORGE_API_KEY (primary) and/or OPENAI_API_KEY (fallback)"
+      "No LLM provider is configured: set BUILT_IN_FORGE_API_KEY (primary) and/or FALLBACK_LLM_API_KEY (fallback)"
     );
   }
 };
@@ -421,10 +425,10 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   if (hasPrimaryProvider()) {
     attempts.push({ label: "primary (Manus Forge)", url: resolveApiUrl(), apiKey: ENV.forgeApiKey, body: payload });
   }
-  if (hasOpenAIFallback()) {
-    // OpenAI requires `model` in the body; the primary provider tolerates it being omitted (it
-    // has its own default), so only fill it in for this attempt.
-    attempts.push({ label: "fallback (OpenAI)", url: OPENAI_API_URL, apiKey: ENV.openaiApiKey, body: { ...payload, model: payload.model || ENV.openaiModel } });
+  if (hasFallbackProvider()) {
+    // The fallback provider requires `model` in the body; the primary tolerates it being omitted
+    // (it has its own default), so only fill it in for this attempt.
+    attempts.push({ label: "fallback", url: resolveFallbackUrl(), apiKey: ENV.fallbackApiKey, body: { ...payload, model: payload.model || ENV.fallbackModel } });
   }
 
   let lastError: unknown;
