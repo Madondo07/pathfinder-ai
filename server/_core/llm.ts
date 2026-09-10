@@ -229,12 +229,6 @@ const resolveFallbackUrl = () => {
 const hasPrimaryProvider = () => Boolean(ENV.forgeApiKey);
 const hasFallbackProvider = () => Boolean(ENV.fallbackApiKey);
 
-const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
-  }
-};
-
 const assertAnyProviderConfigured = () => {
   if (!hasPrimaryProvider() && !hasFallbackProvider()) {
     throw new Error(
@@ -458,37 +452,4 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   }
 
   throw lastError instanceof Error ? lastError : new Error("All configured LLM providers failed");
-}
-
-export type ModelInfo = {
-  id: string;
-  object: string;
-  created: number;
-  owned_by: string;
-};
-
-export type ModelsResponse = {
-  object: string;
-  data: ModelInfo[];
-};
-
-export async function listLLMModels(): Promise<ModelsResponse> {
-  assertApiKey();
-
-  const url = ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/models`
-    : "https://forge.manus.im/v1/models";
-
-  const response = await fetchWithBackoff(url, {
-    headers: { authorization: `Bearer ${ENV.forgeApiKey}` },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `List LLM models failed: ${response.status} ${response.statusText} – ${errorText}`
-    );
-  }
-
-  return (await response.json()) as ModelsResponse;
 }
